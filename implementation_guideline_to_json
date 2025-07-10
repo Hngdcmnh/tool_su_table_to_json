@@ -1,0 +1,209 @@
+# Implementation Guideline for Converting PRD QC Table to Excel Format (Updated Logic Version)
+# Đã cập nhật logic với 2 quy tắc mới và sửa lại logic nối question objects
+
+data_processing_rules:
+  # 1. Quy tắc đọc dữ liệu
+  input_data:
+    source_file: "prd_qc_table.xlsx"
+    columns:
+      - Section: "Question" hoặc "Intent_Response"
+      - Intent: Tên intent
+      - User_Examples: Ví dụ input từ user
+      - Button: Loại button (BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT)
+      - Loop: Số lần lặp
+      - Seq: Thứ tự sequence
+      - Text_Vietnamese: Nội dung text
+      - Mood: Tên mood
+      - Servo_Name: Tên servo
+      - Servo_Duration: Thời gian servo
+
+  # 2. Logic xử lý tổng thể (CẬP NHẬT)
+  main_processing_logic:
+    description: |
+      Dữ liệu được xử lý tuần tự từ trên xuống dưới. Khi gặp các Question rows liền nhau, gộp thành 1 row duy nhất với QUESTION là JSON array chứa tất cả text objects. Sau đó, xử lý các Intent_Response rows tiếp theo bằng cách group theo (Intent, Loop), mỗi group tạo 1 intent row với RESPONSE_1 là JSON array các text objects. 
+      
+      **QUY TẮC QUAN TRỌNG**: Đối với những intent có loop_count max trong 1 intent, cần nối list object của question group TIẾP THEO (phía dưới) vào cuối list response của intent đó.
+    steps:
+      - Đọc dữ liệu từ đầu file
+      - Scan toàn bộ file để xác định tất cả question groups và vị trí của chúng
+      - Khi gặp Question row, tìm tất cả Question rows liền nhau (không có Intent_Response xen giữa)
+      - Gộp các Question rows này thành 1 output row, QUESTION là JSON array các text objects (text, moods)
+      - Sau đó, xử lý các Intent_Response rows tiếp theo, group theo (Intent, Loop), mỗi group tạo 1 intent row
+      - **QUAN TRỌNG**: Xác định intent nào có loop_count max và nối question objects từ question group TIẾP THEO vào RESPONSE_1
+      - Tiếp tục cho đến hết file
+
+  # 3. Quy tắc tạo text object cho QUESTION/RESPONSE_1
+  text_object_creation:
+    text: Lấy từ Text_Vietnamese
+    moods:
+      - Nếu Mood có giá trị: tạo 1 object {mood_name, servo_name, duration} (servo_name lấy từ Servo_Name, duration lấy từ Servo_Duration, mặc định 2000.0 nếu rỗng)
+      - Nếu Mood rỗng: moods là []
+
+  # 4. Quy tắc group intent (CẬP NHẬT)
+  intent_grouping:
+    - Group các Intent_Response rows theo (Intent, Loop)
+    - Mỗi group tạo 1 intent row, RESPONSE_1 là JSON array các text objects
+    - INTENT_NAME lấy từ Intent (chuyển về lowercase nếu là fallback/silence)
+    - INTENT_DESCRIPTION sinh tự động dựa trên User_Examples (xem mục dưới)
+    - LOOP_COUNT lấy từ Loop
+    - **QUAN TRỌNG**: Nếu là intent có loop_count max, nối question objects từ question group TIẾP THEO vào cuối RESPONSE_1
+    - Các trường còn lại mapping theo template
+
+  # 5. Quy tắc nối question objects vào response (CẬP NHẬT)
+  question_appending_rule:
+    description: |
+      Đối với những intent có loop_count max trong 1 intent, cần nối list object của question group TIẾP THEO (phía dưới) vào cuối list response của intent đó.
+    logic:
+      - Xác định loop_count max cho mỗi intent từ dữ liệu input
+      - Scan toàn bộ file để xác định vị trí của tất cả question groups
+      - Khi xử lý intent row có loop_count = max_loop của intent đó:
+        * Tạo RESPONSE_1 từ các text objects của intent group
+        * Tìm question group TIẾP THEO trong sequence (không phải question group phía trước)
+        * Nếu có question group tiếp theo, nối question objects vào cuối RESPONSE_1 array
+        * Nếu không có question group tiếp theo (ví dụ: intent group cuối cùng), không nối gì
+      - Chỉ áp dụng cho intent rows có loop_count max, không áp dụng cho các loop khác
+    example:
+      - Sequence: Question Group 1 → Intent Group 1 → Question Group 2 → Intent Group 2 → Question Group 3 → Intent Group 3
+      - Intent Group 1 có max loop: nối Question Group 2 objects
+      - Intent Group 2 có max loop: nối Question Group 3 objects  
+      - Intent Group 3 có max loop: không nối gì (không có question group tiếp theo)
+    important_note: |
+      **KHÔNG** nối question objects từ question group phía trước. Luôn nối từ question group TIẾP THEO trong sequence.
+
+  # 6. Quy tắc sinh INTENT_DESCRIPTION (CẬP NHẬT)
+  intent_description_generation:
+    description: |
+      **QUY TẮC QUAN TRỌNG**: Khi 2 intent name khác nhau thì intent description cũng phải khác nhau, không được trùng lặp.
+    rules:
+      - Nếu intent là "silence": INTENT_DESCRIPTION = null
+      - Nếu intent là "fallback": INTENT_DESCRIPTION = "User say something not relate to question" + unique suffix
+      - Nếu User_Examples chứa các từ affirm (yes, đồng ý, ok, được, affirm, tôi sẽ giúp, i will help, có): INTENT_DESCRIPTION = "user affirm" + unique suffix nếu cần
+      - Nếu User_Examples chứa các từ decline (no, không, từ chối, không muốn, no way, not, chưa): INTENT_DESCRIPTION = "user decline" + unique suffix nếu cần
+      - Nếu User_Examples có nhiều ví dụ: INTENT_DESCRIPTION = "user says something like: <ví dụ đầu tiên>" + unique suffix nếu cần
+      - Nếu User_Examples rỗng: INTENT_DESCRIPTION = null
+      - **QUAN TRỌNG**: Nếu description bị trùng với intent khác, thêm suffix để phân biệt:
+        * Thêm " - <intent_name_keyword> loop <loop_count>" vào cuối
+        * Hoặc sử dụng ví dụ cụ thể từ User_Examples để tạo description unique
+    uniqueness_enforcement:
+      - Kiểm tra tất cả intent descriptions đã tạo
+      - Nếu phát hiện trùng lặp, điều chỉnh description để đảm bảo unique
+      - Ưu tiên giữ nguyên description cho intent xuất hiện trước, điều chỉnh intent sau
+      - Sử dụng context từ User_Examples để tạo description phân biệt
+
+  # 7. Mapping các trường output
+  field_mapping:
+    QUESTION: JSON array từ consecutive question rows (chỉ cho question output rows)
+    INTENT_NAME: null cho question rows, Intent value cho intent rows
+    INTENT_DESCRIPTION: null cho question rows, sinh tự động cho intent rows (phải unique)
+    BUTTON: Button value hoặc null
+    TRIGGER: null
+    LOOP_COUNT: null cho question rows, Loop value cho intent rows
+    MAX_LOOP: 2 cho question rows, null cho intent rows
+    LANGUAGE: null
+    LLM_ANSWERING: null
+    SCORE: null
+    RESPONSE_1: |
+      - null cho question rows
+      - JSON array cho intent rows
+      - **QUAN TRỌNG**: Nối question objects từ question group TIẾP THEO vào cuối nếu là intent có loop_count max
+    IMAGE_LISTENING: null
+    AUDIO_LISTENING: null
+    PRONUNCIATION_CHECKER_TOOL: null
+    GRAMMAR_CHECKER_TOOL: null
+    LISTENING_ANIMATIONS: null
+    REGEX_POSITIVE: null
+    REGEX_NEGATIVE: null
+
+  # 8. Output Structure
+  output_structure:
+    file_format: "Excel (.xlsx)"
+    columns: 18
+    total_rows: 35
+    question_rows: 3
+    intent_rows: 32
+    column_order:
+      - QUESTION
+      - INTENT_NAME
+      - INTENT_DESCRIPTION
+      - BUTTON
+      - TRIGGER
+      - LOOP_COUNT
+      - MAX_LOOP
+      - LANGUAGE
+      - LLM_ANSWERING
+      - SCORE
+      - RESPONSE_1
+      - IMAGE_LISTENING
+      - AUDIO_LISTENING
+      - PRONUNCIATION_CHECKER_TOOL
+      - GRAMMAR_CHECKER_TOOL
+      - LISTENING_ANIMATIONS
+      - REGEX_POSITIVE
+      - REGEX_NEGATIVE
+
+  # 9. Validation Rules (CẬP NHẬT)
+  validation:
+    - Không có 2 question rows liền nhau trong output
+    - Tất cả consecutive questions trong input phải merge thành 1 row
+    - Question row: QUESTION là valid JSON array, INTENT_NAME/INTENT_DESCRIPTION/RESPONSE_1 = null, MAX_LOOP = 2
+    - Intent row: QUESTION = null, INTENT_NAME/LOOP_COUNT/RESPONSE_1 phải có giá trị, MAX_LOOP = null
+    - fallback intent name phải là "fallback", silence intent name phải là "silence", silence intent_description = null
+    - Số lượng row: 35 (3 question, 32 intent)
+    - Thứ tự: Question → Intents → Question → Intents → Question → Intents
+    - **QUAN TRỌNG**: Tất cả INTENT_DESCRIPTION phải unique (trừ null values)
+    - **QUAN TRỌNG**: Intent có loop_count max phải có question objects từ question group TIẾP THEO được nối vào RESPONSE_1 (nếu có)
+
+  # 10. Implementation Notes (CẬP NHẬT)
+  implementation_notes:
+    max_loop_detection:
+      - Scan toàn bộ dữ liệu trước khi xử lý để xác định max loop cho mỗi intent
+      - Lưu mapping {intent_name: max_loop_count}
+      - Sử dụng mapping này khi xử lý từng intent row
+    
+    question_object_source:
+      - **QUAN TRỌNG**: Question objects để nối lấy từ question group TIẾP THEO trong sequence (không phải phía trước)
+      - Scan toàn bộ file trước để xác định vị trí của tất cả question groups
+      - Khi xử lý intent group, tìm question group tiếp theo trong sequence
+      - Nếu không có question group tiếp theo, không nối gì
+      - Question objects giữ nguyên format {text, moods}
+    
+    description_uniqueness:
+      - Maintain một set các descriptions đã sử dụng
+      - Khi tạo description mới, kiểm tra trùng lặp
+      - Nếu trùng, tạo variant bằng cách thêm context từ intent name hoặc user examples
+      - Đảm bảo tất cả descriptions đều unique
+    
+    processing_order:
+      - Xử lý tuần tự từ đầu file đến cuối
+      - Maintain state về question groups và intent groups đã xử lý
+      - **QUAN TRỌNG**: Đảm bảo question objects được nối từ question group TIẾP THEO vào intent có loop_count max
+      - Logic sequence: Question Group N → Intent Group N (nối Question Group N+1 nếu có) → Question Group N+1 → ...
+
+  # 11. Detailed Processing Algorithm (MỚI)
+  detailed_algorithm:
+    step1_scan_question_groups:
+      - Scan toàn bộ file để tìm tất cả question groups
+      - Lưu vị trí start_index, end_index và objects của mỗi question group
+      - Tạo mapping để dễ dàng tìm question group tiếp theo
+    
+    step2_process_sequentially:
+      - Xử lý tuần tự từ đầu file
+      - Khi gặp question group: tạo question output row
+      - Khi gặp intent group: xử lý tất cả intent rows trong group
+      - Cho mỗi intent row có loop_count max: nối question objects từ question group tiếp theo
+    
+    step3_validate_output:
+      - Kiểm tra tổng số rows = 35 (3 question + 32 intent)
+      - Kiểm tra tất cả INTENT_DESCRIPTION unique
+      - Kiểm tra intent có max loop đã được nối question objects đúng cách
+      - Kiểm tra format JSON của QUESTION và RESPONSE_1
+
+# Example Implementation Flow:
+# Input: Question Group 1 → Intent Group 1 → Question Group 2 → Intent Group 2 → Question Group 3 → Intent Group 3
+# Processing:
+# 1. Create Question Row 1 from Question Group 1
+# 2. Process Intent Group 1, for max loop intents: append Question Group 2 objects to RESPONSE_1
+# 3. Create Question Row 2 from Question Group 2  
+# 4. Process Intent Group 2, for max loop intents: append Question Group 3 objects to RESPONSE_1
+# 5. Create Question Row 3 from Question Group 3
+# 6. Process Intent Group 3, for max loop intents: no appending (no next question group)
