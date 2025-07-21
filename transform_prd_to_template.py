@@ -100,40 +100,69 @@ class PRDTableTransformer:
         return text_obj
     
     def generate_unique_intent_description(self, intent_name, user_examples, loop_count):
-        """Generate unique intent description based on guidelines"""
+        """Generate intent description by taking directly from User_Examples column"""
         if intent_name.lower() == 'silence':
             return None
             
-        base_description = ""
         
         if intent_name.lower() == 'fallback':
-            base_description = "User say something not relate to question"
-        elif user_examples and pd.notna(user_examples):
-            examples_lower = str(user_examples).lower()
-            # Check for affirm keywords
-            if any(word in examples_lower for word in ['yes', 'đồng ý', 'ok', 'được', 'affirm', 'tôi sẽ giúp', 'i will help', 'có']):
-                base_description = "user affirm"
-            # Check for decline keywords
-            elif any(word in examples_lower for word in ['no', 'không', 'từ chối', 'không muốn', 'no way', 'not', 'chưa']):
-                base_description = "user decline"
+            return "User say something not relate to question"
+        
+        # NEW LOGIC: Use User_Examples content, format if it's a list
+        if user_examples and pd.notna(user_examples):
+            user_examples_str = str(user_examples).strip()
+            
+            # Check if it's a list (contains commas or multiple quoted items)
+            if ',' in user_examples_str or (user_examples_str.count('"') >= 4):
+                # Extract first item from the list
+                # Handle both comma-separated and quoted formats
+                if user_examples_str.startswith('"'):
+                    # Format: "item1", "item2", "item3"
+                    first_item = user_examples_str.split('",')[0].strip().strip('"')
+                else:
+                    # Format: item1, item2, item3
+                    first_item = user_examples_str.split(',')[0].strip()
+                
+                # Format as "user say something like <first_item>"
+                description = f'user say something like "{first_item}"'
+                return description
             else:
-                # Use first example
-                first_example = str(user_examples).split(',')[0].strip()
-                base_description = f"user says something like: {first_example}"
+                # Single item, return as-is
+                return user_examples_str if user_examples_str else None
         else:
             return None
             
-        # Make unique if already exists
-        description = base_description
-        counter = 1
-        while description in self.intent_descriptions:
-            description = f"{base_description} - {intent_name.lower()} loop {loop_count}"
-            if description in self.intent_descriptions:
-                description = f"{base_description} - variant {counter}"
-                counter += 1
-                
-        self.intent_descriptions.add(description)
-        return description
+        # ===== COMMENTED OUT: OLD AUTO-GENERATION LOGIC =====
+        # base_description = ""
+        # 
+        # if intent_name.lower() == 'fallback':
+        #     base_description = "User say something not relate to question"
+        # elif user_examples and pd.notna(user_examples):
+        #     examples_lower = str(user_examples).lower()
+        #     # Check for affirm keywords
+        #     if any(word in examples_lower for word in ['yes', 'đồng ý', 'ok', 'được', 'affirm', 'tôi sẽ giúp', 'i will help', 'có']):
+        #         base_description = "user affirm"
+        #     # Check for decline keywords
+        #     elif any(word in examples_lower for word in ['no', 'không', 'từ chối', 'không muốn', 'no way', 'not', 'chưa']):
+        #         base_description = "user decline"
+        #     else:
+        #         # Use first example
+        #         first_example = str(user_examples).split(',')[0].strip()
+        #         base_description = f"user says something like: {first_example}"
+        # else:
+        #     return None
+        #     
+        # # Make unique if already exists
+        # description = base_description
+        # counter = 1
+        # while description in self.intent_descriptions:
+        #     description = f"{base_description} - {intent_name.lower()} loop {loop_count}"
+        #     if description in self.intent_descriptions:
+        #         description = f"{base_description} - variant {counter}"
+        #         counter += 1
+        #         
+        # self.intent_descriptions.add(description)
+        # return description
     
     def find_next_question_group(self, current_position):
         """Find the next question group after current position"""
@@ -219,13 +248,19 @@ class PRDTableTransformer:
             
             # IMPORTANT: If this is max loop intent, append next question objects
             is_max_loop = (loop_count == self.intent_max_loops.get(intent_name, 0))
+            print(f"Intent '{intent_name}', loop {loop_count}, max_loop: {self.intent_max_loops.get(intent_name, 0)}, is_max_loop: {is_max_loop}, next_question_group: {next_question_group is not None}")
+            
             if is_max_loop and next_question_group:
-                print(f"Appending next question group to {intent_name} loop {loop_count}")
+                print(f"✅ Appending next question group to {intent_name} loop {loop_count}")
                 # Add question objects from next group
                 for idx in next_question_group['indices']:
                     next_row = self.df.iloc[idx]
                     next_text_obj = self.create_text_object(next_row)
                     response_objects.append(next_text_obj)
+            elif is_max_loop and not next_question_group:
+                print(f"❌ Max loop but no next_question_group for {intent_name} loop {loop_count}")
+            elif not is_max_loop:
+                print(f"⚪ Not max loop for {intent_name} loop {loop_count}")
             
             # Generate unique intent description
             intent_description = self.generate_unique_intent_description(
@@ -298,6 +333,9 @@ class PRDTableTransformer:
                 
                 # Find next question group for appending (critical logic)
                 next_question_group = self.find_next_question_group(current_idx - 1)
+                
+                # DEBUG: Log next_question_group finding
+                print(f"Processing intent '{intent_name}', current_idx: {current_idx}, next_question_group: {next_question_group}")
                 
                 # Process intent group
                 intent_output_rows = self.process_intent_group(

@@ -1,10 +1,8 @@
-version: '3.8'
-
 services:
   prd-transformer:
     build: .
     ports:
-      - "5000:5000"
+      - "26000:5000"
     volumes:
       - ./uploads:/app/uploads
     environment:
