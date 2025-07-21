@@ -242,7 +242,12 @@
         });
 
         function showError(message) {
-            errorAlert.textContent = message;
+            // Nếu message là mảng (list lỗi), hiển thị từng lỗi
+            if (Array.isArray(message)) {
+                errorAlert.innerHTML = '<ul>' + message.map(e => `<li>${e}</li>`).join('') + '</ul>';
+            } else {
+                errorAlert.textContent = message;
+            }
             errorAlert.style.display = 'block';
             hideProgress();
         }
@@ -294,7 +299,12 @@
                     downloadUrl = data.download_url;
                     document.getElementById('downloadBtn').onclick = () => window.open(downloadUrl);
                 } else {
-                    showError(data.error || 'Error processing file');
+                    // Nếu có details là mảng lỗi, truyền vào showError
+                    if (data.details && Array.isArray(data.details)) {
+                        showError(data.details);
+                    } else {
+                        showError(data.error || 'Error processing file');
+                    }
                 }
             })
             .catch(error => {

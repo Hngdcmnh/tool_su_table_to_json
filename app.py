@@ -12,6 +12,7 @@ from werkzeug.utils import secure_filename
 from transform_prd_to_template import PRDTableTransformer
 import tempfile
 from datetime import datetime
+from utils_validate import validate_image_jpg
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
@@ -50,6 +51,11 @@ def upload_file():
             # Transform the file
             transformer = PRDTableTransformer(filepath)
             output_rows = transformer.transform()
+            
+            # Validate: Image link must end with .jpg
+            image_errors = validate_image_jpg(output_rows)
+            if image_errors:
+                return jsonify({'error': 'Validation failed', 'details': image_errors}), 400
             
             if not output_rows:
                 return jsonify({'error': 'No data to transform'}), 400
