@@ -10,8 +10,11 @@ def validate_image_jpg(output_rows):
                 question_objs = json.loads(question_json)
                 for idx, obj in enumerate(question_objs):
                     image_name = obj.get('image', '')
-                    if image_name and not (image_name.lower().endswith('.jpg') or image_name.lower().endswith('.gif')):
-                        errors.append(f"Row {i+1} (QUESTION, item {idx+1}): Image name must end with .jpg or .gif: {image_name}")
+                    if image_name:
+                        if ' ' in image_name:
+                            errors.append(f"Row {i+1} (QUESTION, item {idx+1}): Image name must not contain spaces: {image_name}")
+                        elif not (image_name.lower().endswith('.jpg') or image_name.lower().endswith('.gif')):
+                            errors.append(f"Row {i+1} (QUESTION, item {idx+1}): Image name must end with .jpg or .gif: {image_name}")
             except Exception:
                 pass
         # Kiểm tra cột RESPONSE_1 (nếu có)
@@ -21,8 +24,11 @@ def validate_image_jpg(output_rows):
                 response_objs = json.loads(response_json)
                 for idx, obj in enumerate(response_objs):
                     image_name = obj.get('image', '')
-                    if image_name and not (image_name.lower().endswith('.jpg') or image_name.lower().endswith('.gif')):
-                        errors.append(f"Row {i+1} (RESPONSE_1, item {idx+1}): Image name must end with .jpg or .gif: {image_name}")
+                    if image_name:
+                        if ' ' in image_name:
+                            errors.append(f"Row {i+1} (RESPONSE_1, item {idx+1}): Image name must not contain spaces: {image_name}")
+                        elif not (image_name.lower().endswith('.jpg') or image_name.lower().endswith('.gif')):
+                            errors.append(f"Row {i+1} (RESPONSE_1, item {idx+1}): Image name must end with .jpg or .gif: {image_name}")
             except Exception:
                 pass
     return errors 
