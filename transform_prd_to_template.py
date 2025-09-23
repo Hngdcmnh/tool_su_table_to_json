@@ -28,27 +28,47 @@ class PRDTableTransformer:
         print(f"Total rows: {len(self.df)}")
         print(f"Columns: {list(self.df.columns)}")
         
-        # Find max loop for each intent
-        intent_loops = defaultdict(list)
-        for _, row in self.df.iterrows():
-            if pd.notna(row['Intent']) and pd.notna(row['Loop']):
-                intent_loops[row['Intent']].append(row['Loop'])
-        
-        self.intent_max_loops = {intent: max(loops) for intent, loops in intent_loops.items()}
-        print(f"Intent max loops: {self.intent_max_loops}")
-        
-        # DEBUG: Check fallback specifically
-        for intent_name, max_loop in self.intent_max_loops.items():
-            if str(intent_name).lower() == 'fallback':
-                print(f"🔍 Found fallback: '{intent_name}' with max loop: {max_loop}")
-                fallback_loops = intent_loops[intent_name]
-                print(f"   All fallback loops: {fallback_loops}")
-                break
-        else:
-            print("❌ No fallback found in intent_max_loops!")
-        
-        # Find question groups positions
+        # Find question groups positions first
         self.scan_question_groups()
+        
+        # Find max loop for each intent within each question turn
+        self.calculate_intent_max_loops_per_turn()
+        
+    def calculate_intent_max_loops_per_turn(self):
+        """Calculate max loop for each intent within question turns"""
+        # Store max loops per turn for later use
+        self.turn_intent_max_loops = {}
+        
+        # Process each question turn (from one question group to the next)
+        for i in range(len(self.question_groups)):
+            turn_start = self.question_groups[i]['end'] + 1  # Start after current question group
+            turn_end = self.question_groups[i + 1]['start'] - 1 if i + 1 < len(self.question_groups) else len(self.df) - 1
+            
+            # Find max loop for each intent within this turn
+            turn_intent_loops = defaultdict(list)
+            for idx in range(turn_start, turn_end + 1):
+                if idx < len(self.df):
+                    row = self.df.iloc[idx]
+                    if pd.notna(row['Intent']) and pd.notna(row['Loop']):
+                        turn_intent_loops[row['Intent']].append(row['Loop'])
+            
+            # Calculate max loop for each intent in this turn
+            turn_max_loops = {}
+            for intent, loops in turn_intent_loops.items():
+                if loops:
+                    turn_max_loops[intent] = max(loops)
+            
+            # Store turn max loops with turn range info
+            self.turn_intent_max_loops[(turn_start, turn_end)] = turn_max_loops
+            
+        print(f"Intent max loops per turn: {self.turn_intent_max_loops}")
+        
+        # Keep global max loops for backward compatibility (but use turn-specific logic)
+        intent_max_loops = defaultdict(int)
+        for turn_range, turn_max_loops in self.turn_intent_max_loops.items():
+            for intent, max_loop in turn_max_loops.items():
+                intent_max_loops[intent] = max(intent_max_loops[intent], max_loop)
+        self.intent_max_loops = dict(intent_max_loops)
         
     def scan_question_groups(self):
         """Scan and identify all question groups in the data"""
@@ -110,69 +130,40 @@ class PRDTableTransformer:
         return text_obj
     
     def generate_unique_intent_description(self, intent_name, user_examples, loop_count):
-        """Generate intent description by taking directly from User_Examples column"""
+        """Generate unique intent description based on guidelines"""
         if intent_name.lower() == 'silence':
             return None
             
+        base_description = ""
         
         if intent_name.lower() == 'fallback':
-            return "User say something not relate to question"
-        
-        # NEW LOGIC: Use User_Examples content, format if it's a list
-        if user_examples and pd.notna(user_examples):
-            user_examples_str = str(user_examples).strip()
-            
-            # Check if it's a list (contains commas or multiple quoted items)
-            if ',' in user_examples_str or (user_examples_str.count('"') >= 4):
-                # Extract first item from the list
-                # Handle both comma-separated and quoted formats
-                if user_examples_str.startswith('"'):
-                    # Format: "item1", "item2", "item3"
-                    first_item = user_examples_str.split('",')[0].strip().strip('"')
-                else:
-                    # Format: item1, item2, item3
-                    first_item = user_examples_str.split(',')[0].strip()
-                
-                # Format as "user say something like <first_item>"
-                description = f'user say something like "{first_item}"'
-                return description
+            base_description = "User say something not relate to question"
+        elif user_examples and pd.notna(user_examples):
+            examples_lower = str(user_examples).lower()
+            # Check for affirm keywords
+            if any(word in examples_lower for word in ['yes', 'đồng ý', 'ok', 'được', 'affirm', 'tôi sẽ giúp', 'i will help', 'có']):
+                base_description = "user affirm"
+            # Check for decline keywords
+            elif any(word in examples_lower for word in ['no', 'không', 'từ chối', 'không muốn', 'no way', 'not', 'chưa']):
+                base_description = "user decline"
             else:
-                # Single item, return as-is
-                return user_examples_str if user_examples_str else None
+                # Use first example
+                first_example = str(user_examples).split(',')[0].strip()
+                base_description = f"user says something like: {first_example}"
         else:
             return None
             
-        # ===== COMMENTED OUT: OLD AUTO-GENERATION LOGIC =====
-        # base_description = ""
-        # 
-        # if intent_name.lower() == 'fallback':
-        #     base_description = "User say something not relate to question"
-        # elif user_examples and pd.notna(user_examples):
-        #     examples_lower = str(user_examples).lower()
-        #     # Check for affirm keywords
-        #     if any(word in examples_lower for word in ['yes', 'đồng ý', 'ok', 'được', 'affirm', 'tôi sẽ giúp', 'i will help', 'có']):
-        #         base_description = "user affirm"
-        #     # Check for decline keywords
-        #     elif any(word in examples_lower for word in ['no', 'không', 'từ chối', 'không muốn', 'no way', 'not', 'chưa']):
-        #         base_description = "user decline"
-        #     else:
-        #         # Use first example
-        #         first_example = str(user_examples).split(',')[0].strip()
-        #         base_description = f"user says something like: {first_example}"
-        # else:
-        #     return None
-        #     
-        # # Make unique if already exists
-        # description = base_description
-        # counter = 1
-        # while description in self.intent_descriptions:
-        #     description = f"{base_description} - {intent_name.lower()} loop {loop_count}"
-        #     if description in self.intent_descriptions:
-        #         description = f"{base_description} - variant {counter}"
-        #         counter += 1
-        #         
-        # self.intent_descriptions.add(description)
-        # return description
+        # Make unique if already exists
+        description = base_description
+        counter = 1
+        while description in self.intent_descriptions:
+            description = f"{base_description} - {intent_name.lower()} loop {loop_count}"
+            if description in self.intent_descriptions:
+                description = f"{base_description} - variant {counter}"
+                counter += 1
+                
+        self.intent_descriptions.add(description)
+        return description
     
     def find_next_question_group(self, current_position):
         """Find the next question group after current position"""
@@ -225,7 +216,7 @@ class PRDTableTransformer:
         
         return question_row
     
-    def process_intent_group(self, intent_name, intent_rows, next_question_group=None):
+    def process_intent_group(self, intent_name, intent_rows, next_question_group=None, current_turn_range=None):
         """Process a group of intent rows with same Intent, grouped by Loop"""
         # Group by Loop
         loop_groups = defaultdict(list)
@@ -233,6 +224,11 @@ class PRDTableTransformer:
             loop_groups[row['Loop']].append(row)
         
         intent_output_rows = []
+        
+        # Get max loop for this intent in current turn
+        turn_max_loop = 0
+        if current_turn_range and current_turn_range in self.turn_intent_max_loops:
+            turn_max_loop = self.turn_intent_max_loops[current_turn_range].get(intent_name, 0)
         
         for loop_count, rows in loop_groups.items():
             # Create response objects
@@ -256,31 +252,15 @@ class PRDTableTransformer:
                 if pd.notna(row['Audio_Listening']) and audio_listening is None:
                     audio_listening = row['Audio_Listening']
             
-            # IMPORTANT: If this is max loop intent, append next question objects
-            is_max_loop = (loop_count == self.intent_max_loops.get(intent_name, 0))
-            print(f"Intent '{intent_name}', loop {loop_count}, max_loop: {self.intent_max_loops.get(intent_name, 0)}, is_max_loop: {is_max_loop}, next_question_group: {next_question_group is not None}")
-            
-            # SPECIAL DEBUG FOR FALLBACK
-            if str(intent_name).lower() == 'fallback':
-                print(f"🚨 FALLBACK PROCESSING:")
-                print(f"   Intent name: '{intent_name}'")
-                print(f"   Loop count: {loop_count} (type: {type(loop_count)})")
-                print(f"   Max loop lookup: {self.intent_max_loops.get(intent_name, 0)}")
-                print(f"   Is max loop calculation: {loop_count} == {self.intent_max_loops.get(intent_name, 0)} = {is_max_loop}")
-                print(f"   Next question group: {next_question_group}")
-                print(f"   Will append: {is_max_loop and next_question_group is not None}")
-            
-            if is_max_loop and next_question_group:
-                print(f"✅ Appending next question group to {intent_name} loop {loop_count}")
+            # IMPORTANT: If this is max loop intent IN CURRENT TURN, append next question objects
+            is_max_loop = (loop_count == turn_max_loop)
+            if is_max_loop and next_question_group and turn_max_loop > 0:
+                print(f"Appending next question group to {intent_name} loop {loop_count} (turn max: {turn_max_loop})")
                 # Add question objects from next group
                 for idx in next_question_group['indices']:
                     next_row = self.df.iloc[idx]
                     next_text_obj = self.create_text_object(next_row)
                     response_objects.append(next_text_obj)
-            elif is_max_loop and not next_question_group:
-                print(f"❌ Max loop but no next_question_group for {intent_name} loop {loop_count}")
-            elif not is_max_loop:
-                print(f"⚪ Not max loop for {intent_name} loop {loop_count}")
             
             # Generate unique intent description
             intent_description = self.generate_unique_intent_description(
@@ -354,12 +334,18 @@ class PRDTableTransformer:
                 # Find next question group for appending (critical logic)
                 next_question_group = self.find_next_question_group(current_idx - 1)
                 
-                # DEBUG: Log next_question_group finding
-                print(f"Processing intent '{intent_name}', current_idx: {current_idx}, next_question_group: {next_question_group}")
+                # Find current turn range for max loop calculation
+                current_turn_range = None
+                intent_start_position = intent_rows[0].name if intent_rows else current_idx - 1
+                for turn_range in self.turn_intent_max_loops.keys():
+                    turn_start, turn_end = turn_range
+                    if turn_start <= intent_start_position <= turn_end:
+                        current_turn_range = turn_range
+                        break
                 
                 # Process intent group
                 intent_output_rows = self.process_intent_group(
-                    intent_name, intent_rows, next_question_group
+                    intent_name, intent_rows, next_question_group, current_turn_range
                 )
                 self.output_rows.extend(intent_output_rows)
             else:
