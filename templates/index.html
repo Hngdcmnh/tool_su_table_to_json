@@ -245,8 +245,12 @@
             // Nếu message là mảng (list lỗi), hiển thị từng lỗi
             if (Array.isArray(message)) {
                 errorAlert.innerHTML = '<ul>' + message.map(e => `<li>${e}</li>`).join('') + '</ul>';
+                // Log từng lỗi ra console
+                message.forEach(e => console.error('[Validation Error]', e));
             } else {
                 errorAlert.textContent = message;
+                // Log lỗi chuỗi ra console
+                console.error('[Validation Error]', message);
             }
             errorAlert.style.display = 'block';
             hideProgress();
@@ -294,10 +298,24 @@
             .then(response => response.json())
             .then(data => {
                 hideProgress();
+                // Log chi tiết từng nhóm question và intent nếu có
+                if (data.pattern_result && data.pattern_result.question_details) {
+                    data.pattern_result.question_details.forEach(q => {
+                        console.log(`[Validation][Question dòng ${q.row}] \"${q.question}\"`);
+                        console.log('  Intents:', q.intents);
+                        if (!q.is_valid) {
+                            console.error('  ❌ Không hợp lệ - Thiếu:', q.missing);
+                        } else {
+                            console.log('  ✅ Hợp lệ');
+                        }
+                    });
+                }
                 if (data.success) {
                     displayResults(data.table_data, data.stats);
                     downloadUrl = data.download_url;
                     document.getElementById('downloadBtn').onclick = () => window.open(downloadUrl);
+                    // Log ra console khi không có lỗi
+                    console.log('[Validation] Không có lỗi, dữ liệu hợp lệ!');
                 } else {
                     // Nếu có details là mảng lỗi, truyền vào showError
                     if (data.details && Array.isArray(data.details)) {

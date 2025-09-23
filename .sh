@@ -1,0 +1,1 @@
+PORT=8888 python3 app.py

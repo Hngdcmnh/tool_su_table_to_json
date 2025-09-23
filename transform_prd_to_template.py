@@ -37,6 +37,16 @@ class PRDTableTransformer:
         self.intent_max_loops = {intent: max(loops) for intent, loops in intent_loops.items()}
         print(f"Intent max loops: {self.intent_max_loops}")
         
+        # DEBUG: Check fallback specifically
+        for intent_name, max_loop in self.intent_max_loops.items():
+            if str(intent_name).lower() == 'fallback':
+                print(f"🔍 Found fallback: '{intent_name}' with max loop: {max_loop}")
+                fallback_loops = intent_loops[intent_name]
+                print(f"   All fallback loops: {fallback_loops}")
+                break
+        else:
+            print("❌ No fallback found in intent_max_loops!")
+        
         # Find question groups positions
         self.scan_question_groups()
         
@@ -249,6 +259,16 @@ class PRDTableTransformer:
             # IMPORTANT: If this is max loop intent, append next question objects
             is_max_loop = (loop_count == self.intent_max_loops.get(intent_name, 0))
             print(f"Intent '{intent_name}', loop {loop_count}, max_loop: {self.intent_max_loops.get(intent_name, 0)}, is_max_loop: {is_max_loop}, next_question_group: {next_question_group is not None}")
+            
+            # SPECIAL DEBUG FOR FALLBACK
+            if str(intent_name).lower() == 'fallback':
+                print(f"🚨 FALLBACK PROCESSING:")
+                print(f"   Intent name: '{intent_name}'")
+                print(f"   Loop count: {loop_count} (type: {type(loop_count)})")
+                print(f"   Max loop lookup: {self.intent_max_loops.get(intent_name, 0)}")
+                print(f"   Is max loop calculation: {loop_count} == {self.intent_max_loops.get(intent_name, 0)} = {is_max_loop}")
+                print(f"   Next question group: {next_question_group}")
+                print(f"   Will append: {is_max_loop and next_question_group is not None}")
             
             if is_max_loop and next_question_group:
                 print(f"✅ Appending next question group to {intent_name} loop {loop_count}")

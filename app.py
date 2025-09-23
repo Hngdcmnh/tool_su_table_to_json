@@ -12,7 +12,7 @@ from werkzeug.utils import secure_filename
 from transform_prd_to_template import PRDTableTransformer
 import tempfile
 from datetime import datetime
-from utils_validate import validate_image_jpg
+from utils_validate import validate_image_jpg, validate_question_intent_pattern
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
@@ -56,6 +56,11 @@ def upload_file():
             image_errors = validate_image_jpg(output_rows)
             if image_errors:
                 return jsonify({'error': 'Validation failed', 'details': image_errors}), 400
+            
+            # Validate: Question-Intent pattern (mỗi nhóm sau Question phải có đủ fallback và silence)
+            pattern_result = validate_question_intent_pattern(output_rows)
+            if pattern_result and pattern_result.get('errors'):
+                return jsonify({'error': 'Validation failed', 'details': pattern_result['errors'], 'pattern_result': pattern_result}), 400
             
             if not output_rows:
                 return jsonify({'error': 'No data to transform'}), 400
@@ -103,7 +108,8 @@ def upload_file():
                     'total_rows': len(df),
                     'question_rows': len(df[df['QUESTION'].notna()]),
                     'intent_rows': len(df[df['INTENT_NAME'].notna()])
-                }
+                },
+                'pattern_result': pattern_result
             })
         
         else:
