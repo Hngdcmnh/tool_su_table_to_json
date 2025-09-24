@@ -245,8 +245,8 @@ class PRDTableTransformer:
                 # Get values from any row in loop group
                 if pd.notna(row['Button']) and button_value is None:
                     button_value = row['Button']
-                if pd.notna(row['User_Examples']) and user_examples is None:
-                    user_examples = row['User_Examples']
+                if pd.notna(row['Intent_Description']) and user_examples is None:
+                    user_examples = row['Intent_Description']
                 if pd.notna(row['Image_Listening']) and image_listening is None:
                     image_listening = row['Image_Listening']
                 if pd.notna(row['Audio_Listening']) and audio_listening is None:
