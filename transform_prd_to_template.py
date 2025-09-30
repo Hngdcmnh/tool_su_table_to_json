@@ -56,7 +56,7 @@ class PRDTableTransformer:
             turn_max_loops = {}
             for intent, loops in turn_intent_loops.items():
                 if loops:
-                    turn_max_loops[intent] = max(loops)
+                    turn_max_loops[intent] = max(loops)  # Convert to Python int
             
             # Store turn max loops with turn range info
             self.turn_intent_max_loops[(turn_start, turn_end)] = turn_max_loops
@@ -67,7 +67,7 @@ class PRDTableTransformer:
         intent_max_loops = defaultdict(int)
         for turn_range, turn_max_loops in self.turn_intent_max_loops.items():
             for intent, max_loop in turn_max_loops.items():
-                intent_max_loops[intent] = max(intent_max_loops[intent], max_loop)
+                intent_max_loops[intent] = max(intent_max_loops[intent], max_loop)  # Convert to Python int
         self.intent_max_loops = dict(intent_max_loops)
         
     def scan_question_groups(self):
@@ -138,29 +138,12 @@ class PRDTableTransformer:
         
         if intent_name.lower() == 'fallback':
             base_description = "User say something not relate to question"
-        elif user_examples and pd.notna(user_examples):
-            examples_lower = str(user_examples).lower()
-            # Check for affirm keywords
-            if any(word in examples_lower for word in ['yes', 'đồng ý', 'ok', 'được', 'affirm', 'tôi sẽ giúp', 'i will help', 'có']):
-                base_description = "user affirm"
-            # Check for decline keywords
-            elif any(word in examples_lower for word in ['no', 'không', 'từ chối', 'không muốn', 'no way', 'not', 'chưa']):
-                base_description = "user decline"
-            else:
-                # Use first example
-                first_example = str(user_examples).split(',')[0].strip()
-                base_description = f"user says something like: {first_example}"
         else:
-            return None
+            base_description = str(user_examples).lower()
             
         # Make unique if already exists
         description = base_description
-        counter = 1
-        while description in self.intent_descriptions:
-            description = f"{base_description} - {intent_name.lower()} loop {loop_count}"
-            if description in self.intent_descriptions:
-                description = f"{base_description} - variant {counter}"
-                counter += 1
+
                 
         self.intent_descriptions.add(description)
         return description
@@ -253,6 +236,7 @@ class PRDTableTransformer:
                     audio_listening = row['Audio_Listening']
             
             # IMPORTANT: If this is max loop intent IN CURRENT TURN, append next question objects
+            # Convert both to Python int to avoid numpy comparison issues
             is_max_loop = (loop_count == turn_max_loop)
             if is_max_loop and next_question_group and turn_max_loop > 0:
                 print(f"Appending next question group to {intent_name} loop {loop_count} (turn max: {turn_max_loop})")
